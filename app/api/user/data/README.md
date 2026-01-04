@@ -87,12 +87,6 @@ Open [http://localhost:3000](http://localhost:3000) to see the app in action.
 
 ---
 
-## 📸 Screenshots
-
-*(Add your screenshots here)*
-
----
-
 ## 🛡 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
