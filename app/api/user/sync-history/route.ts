@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { supabase } from '@/lib/supabase';
 import { syncAllActivities } from '@/lib/strava';
 import { getCurrentUser } from '@/lib/auth';
 import axios from 'axios';
@@ -16,12 +16,13 @@ export async function POST(request: Request) {
         const perPage = 30;
 
         // Fetch user from session ID, not request body (safer)
-        const user = await prisma.user.findUnique({
-            where: { id: sessionUser.id },
-            include: { goals: true }
-        });
+        const { data: user, error } = await supabase
+            .from('users')
+            .select('*')
+            .eq('id', sessionUser.id)
+            .single();
 
-        if (!user) {
+        if (error || !user) {
             return NextResponse.json({ error: 'User not found' }, { status: 404 });
         }
 

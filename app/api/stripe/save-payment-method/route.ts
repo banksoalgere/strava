@@ -1,18 +1,32 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { supabase } from '@/lib/supabase';
+import { getCurrentUser } from '@/lib/auth';
 
 export async function POST(request: Request) {
     try {
+        // Authenticate user
+        const sessionUser = await getCurrentUser();
+        if (!sessionUser) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+
         const { userId, paymentMethodId } = await request.json();
 
         if (!userId || !paymentMethodId) {
             return NextResponse.json({ error: 'userId and paymentMethodId are required' }, { status: 400 });
         }
 
-        await prisma.user.update({
-            where: { id: userId },
-            data: { paymentMethodId },
-        });
+        // Security: Ensure user can only update their own payment method
+        if (userId !== sessionUser.id) {
+            return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+        }
+
+        const { error } = await supabase
+            .from('users')
+            .update({ payment_method_id: paymentMethodId })
+            .eq('id', userId);
+
+        if (error) throw new Error(error.message);
 
         return NextResponse.json({ success: true });
     } catch (error: unknown) {

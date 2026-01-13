@@ -1,0 +1,1 @@
+ALTER TABLE activities ALTER COLUMN goal_id DROP NOT NULL;

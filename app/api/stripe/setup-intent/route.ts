@@ -1,20 +1,36 @@
 import { NextResponse } from 'next/server';
 import { stripe } from '@/lib/stripe';
-import { prisma } from '@/lib/prisma';
+import { supabase } from '@/lib/supabase';
+import { getCurrentUser } from '@/lib/auth';
 
 export async function POST(request: Request) {
     try {
-        const { userId } = await request.json();
+        // Authenticate user
+        const sessionUser = await getCurrentUser();
+        if (!sessionUser) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
 
-        const user = await prisma.user.findUnique({
-            where: { id: userId },
-        });
+        const body = await request.json();
+        const { userId } = body;
 
-        if (!user) {
+        // Security: If userId is provided, ensure it matches authenticated user
+        const targetUserId = userId || sessionUser.id;
+        if (targetUserId !== sessionUser.id) {
+            return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+        }
+
+        const { data: user, error: userError } = await supabase
+            .from('users')
+            .select('*')
+            .eq('id', targetUserId)
+            .single();
+
+        if (userError || !user) {
             return NextResponse.json({ error: 'User not found' }, { status: 404 });
         }
 
-        let customerId = user.stripeCustomerId;
+        let customerId = user.stripe_customer_id;
 
         if (!customerId) {
             const customer = await stripe.customers.create({
@@ -22,10 +38,13 @@ export async function POST(request: Request) {
                 metadata: { userId: user.id },
             });
             customerId = customer.id;
-            await prisma.user.update({
-                where: { id: user.id },
-                data: { stripeCustomerId: customerId },
-            });
+
+            const { error: updateError } = await supabase
+                .from('users')
+                .update({ stripe_customer_id: customerId })
+                .eq('id', user.id);
+
+            if (updateError) throw new Error(updateError.message);
         }
 
         const setupIntent = await stripe.setupIntents.create({

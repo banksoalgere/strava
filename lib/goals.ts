@@ -1,29 +1,52 @@
-import { prisma } from '@/lib/prisma';
+import { supabase } from '@/lib/supabase';
 import { chargePenalty } from './penalties';
 
-export async function checkGoalsAndCharge(userId: string) {
-    const user = await prisma.user.findUnique({
-        where: { id: userId },
-        include: {
-            goals: {
-                where: { isActive: true },
-                include: { activities: true },
-            },
-        },
-    });
+interface Activity {
+    distance: number;
+}
 
-    if (!user) throw new Error('User not found');
+interface Goal {
+    id: string;
+    type: string;
+    target: number;
+    penalty: number;
+    activities?: Activity[];
+}
+
+export async function checkGoalsAndCharge(userId: string) {
+    // 1. Get User for payment info
+    const { data: user, error: userError } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', userId)
+        .single();
+
+    if (userError || !user) throw new Error('User not found');
+
+    // 2. Get Active Goals with Activities
+    const { data: goals, error: goalsError } = await supabase
+        .from('goals')
+        .select(`
+            *,
+            activities:activities(*)
+        `)
+        .eq('user_id', userId)
+        .eq('is_active', true);
+
+    if (goalsError) throw new Error(`Error fetching goals: ${goalsError.message}`);
 
     const results = [];
 
-    for (const goal of user.goals) {
+    for (const goal of (goals as Goal[])) {
         // Simple logic: sum distance for the goal period
-        const totalDistance = goal.activities.reduce((sum, act) => sum + act.distance, 0) / 1000; // to km
+        // Note: activities array might be null/undefined if join failed or empty, need safety
+        const activities = goal.activities || [];
+        const totalDistance = activities.reduce((sum, act) => sum + act.distance, 0) / 1000; // to km
 
         if (totalDistance < goal.target) {
             // Goal missed!
             try {
-                if (user.paymentMethodId) {
+                if (user.payment_method_id) {
                     await chargePenalty(user.id, goal.penalty);
                     results.push({ goalId: goal.id, status: 'missed', charged: true });
                 } else {

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { syncStravaActivities, checkGoalsAndCharge } from '@/lib/strava';
+import { supabase } from '@/lib/supabase';
+import { syncStravaActivities } from '@/lib/strava';
+import { checkGoalsAndCharge } from '@/lib/goals';
 import { getCurrentUser } from '@/lib/auth';
 import axios from 'axios';
 
@@ -23,11 +24,13 @@ export async function POST(request: Request) {
             return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
         }
 
-        const user = await prisma.user.findUnique({
-            where: { id: userId }
-        });
+        const { data: user, error } = await supabase
+            .from('users')
+            .select('*')
+            .eq('id', userId)
+            .single();
 
-        if (!user) {
+        if (error || !user) {
             return NextResponse.json({ error: 'User not found' }, { status: 404 });
         }
 
@@ -35,7 +38,7 @@ export async function POST(request: Request) {
         await syncStravaActivities(userId);
 
         // 2. Check goals and potentially charge user
-        // Note: In a real scheduled job, we wouldn't rely on client-side triggering
+        // Switching to the real implementation in lib/goals
         await checkGoalsAndCharge(userId);
 
         return NextResponse.json({ success: true });

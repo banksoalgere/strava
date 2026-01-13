@@ -1,0 +1,1 @@
+ALTER TABLE activities ADD COLUMN user_id uuid references users(id);

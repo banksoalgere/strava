@@ -1,11 +1,11 @@
 import { NextAuthOptions, getServerSession } from 'next-auth';
 import StravaProvider from 'next-auth/providers/strava';
-import { PrismaAdapter } from '@next-auth/prisma-adapter';
-import { prisma } from '@/lib/prisma';
+import { SupabaseAdapter } from "@/lib/custom-supabase-adapter"
+import { supabase } from "@/lib/supabase"
 import { redirect } from 'next/navigation';
 
 export const authOptions: NextAuthOptions = {
-    adapter: PrismaAdapter(prisma),
+    adapter: SupabaseAdapter(supabase),
     providers: [
         StravaProvider({
             clientId: process.env.STRAVA_CLIENT_ID!,

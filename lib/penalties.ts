@@ -1,12 +1,14 @@
 import { stripe } from '@/lib/stripe';
-import { prisma } from '@/lib/prisma';
+import { supabase } from '@/lib/supabase';
 
 export async function chargePenalty(userId: string, amount: number) {
-    const user = await prisma.user.findUnique({
-        where: { id: userId },
-    });
+    const { data: user, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', userId)
+        .single();
 
-    if (!user || !user.stripeCustomerId || !user.paymentMethodId) {
+    if (error || !user || !user.stripe_customer_id || !user.payment_method_id) {
         throw new Error('User or payment method not found');
     }
 
@@ -14,8 +16,8 @@ export async function chargePenalty(userId: string, amount: number) {
         const paymentIntent = await stripe.paymentIntents.create({
             amount: Math.round(amount * 100), // convert to cents
             currency: 'usd',
-            customer: user.stripeCustomerId,
-            payment_method: user.paymentMethodId,
+            customer: user.stripe_customer_id,
+            payment_method: user.payment_method_id,
             off_session: true,
             confirm: true,
             description: 'Strava Accountability Penalty',

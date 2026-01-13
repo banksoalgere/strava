@@ -57,6 +57,7 @@ interface StatsData {
     monthly: { month: string; distance: number }[];
     consistency: { score: number; activeWeeks: number; totalWeeks: number };
     streaks: { current: number; longest: number };
+    dailyStrk: { current: number; longest: number };
     dayOfWeek: { day: string; count: number }[];
     hourOfDay: { hour: number; count: number }[];
     paceZones: { zone: string; count: number }[];
@@ -156,13 +157,21 @@ export default function StatsPage() {
 
     const { lifetime, weekly, monthly, consistency, streaks, dayOfWeek, hourOfDay, paceZones, personalRecords, calendar } = stats;
 
-    // Find max values for scaling
-    const maxWeeklyDistance = Math.max(...weekly.map((w) => w.distance), 1);
-    const maxMonthlyDistance = Math.max(...monthly.map((m) => m.distance), 1);
-    const maxDayCount = Math.max(...dayOfWeek.map((d) => d.count), 1);
-    const maxHourCount = Math.max(...hourOfDay.map((h) => h.count), 1);
-    const maxPaceZone = Math.max(...paceZones.map((p) => p.count), 1);
-    const maxCalendarDistance = Math.max(...calendar.map((c) => c.distance), 1);
+    // Use safe getters to prevent crashes on missing data
+    const safeWeekly = weekly || [];
+    const safeMonthly = monthly || [];
+    const safeDayOfWeek = dayOfWeek || [];
+    const safeHourOfDay = hourOfDay || [];
+    const safePaceZones = paceZones || [];
+    const safeCalendar = calendar || [];
+
+    // Find max values for scaling with safety checks
+    const maxWeeklyDistance = Math.max(...safeWeekly.map((w) => w.distance), 1);
+    const maxMonthlyDistance = Math.max(...safeMonthly.map((m) => m.distance), 1);
+    const maxDayCount = Math.max(...safeDayOfWeek.map((d) => d.count), 1);
+    const maxHourCount = Math.max(...safeHourOfDay.map((h) => h.count), 1);
+    const maxPaceZone = Math.max(...safePaceZones.map((p) => p.count), 1);
+    const maxCalendarDistance = Math.max(...safeCalendar.map((c) => c.distance), 1);
 
     return (
         <div className="min-h-screen bg-[#000000] text-white p-6 md:p-12 relative overflow-hidden">
@@ -206,18 +215,18 @@ export default function StatsPage() {
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                         <StatCard
                             label="Total Distance"
-                            value={`${lifetime.distance.toFixed(1)}`}
+                            value={`${(lifetime.distance || 0).toFixed(1)}`}
                             unit="km"
                             icon={<TrendingUp className="w-4 h-4" />}
                         />
                         <StatCard
                             label="Total Time"
-                            value={formatTime(lifetime.time)}
+                            value={formatTime(lifetime.time || 0)}
                             icon={<Clock className="w-4 h-4" />}
                         />
                         <StatCard
                             label="Total Elevation"
-                            value={(lifetime.elevation).toFixed(0)}
+                            value={(lifetime.elevation || 0).toFixed(0)}
                             unit="m"
                             icon={<TrendingUp className="w-4 h-4" />}
                         />
@@ -229,12 +238,12 @@ export default function StatsPage() {
                         />
                         <StatCard
                             label="Activities"
-                            value={lifetime.activities.toString()}
+                            value={(lifetime.activities || 0).toString()}
                             icon={<Activity className="w-4 h-4" />}
                         />
                         <StatCard
                             label="Avg Pace"
-                            value={formatPace(lifetime.avgPace)}
+                            value={formatPace(lifetime.avgPace || 0)}
                             unit="/km"
                             icon={<Zap className="w-4 h-4" />}
                         />
@@ -273,7 +282,7 @@ export default function StatsPage() {
                     <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
                         <Flame className="w-5 h-5 text-orange-500" /> Consistency & Streaks
                     </h2>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
                         <Card className="p-6 text-center">
                             <div className="text-5xl font-bold text-orange-500 mb-2">{consistency.score}%</div>
                             <div className="text-xs text-white/40 uppercase tracking-widest">Consistency Score</div>
@@ -281,16 +290,26 @@ export default function StatsPage() {
                         </Card>
                         <Card className="p-6 text-center">
                             <div className="text-5xl font-bold text-green-500 mb-2">{streaks.current}</div>
-                            <div className="text-xs text-white/40 uppercase tracking-widest">Current Streak</div>
+                            <div className="text-xs text-white/40 uppercase tracking-widest">Current Wk Streak</div>
                             <div className="text-xs text-white/30 mt-1">weeks in a row</div>
                         </Card>
                         <Card className="p-6 text-center">
+                            <div className="text-5xl font-bold text-green-400 mb-2">{stats.dailyStrk?.current || 0}</div>
+                            <div className="text-xs text-white/40 uppercase tracking-widest">Current Day Streak</div>
+                            <div className="text-xs text-white/30 mt-1">days in a row</div>
+                        </Card>
+                        <Card className="p-6 text-center">
                             <div className="text-5xl font-bold text-purple-500 mb-2">{streaks.longest}</div>
-                            <div className="text-xs text-white/40 uppercase tracking-widest">Longest Streak</div>
+                            <div className="text-xs text-white/40 uppercase tracking-widest">Longest Wk Streak</div>
                             <div className="text-xs text-white/30 mt-1">all-time best</div>
                         </Card>
                         <Card className="p-6 text-center">
-                            <div className="text-5xl font-bold text-blue-500 mb-2">{Math.round(lifetime.distance / Math.max(consistency.activeWeeks, 1))}</div>
+                            <div className="text-5xl font-bold text-purple-400 mb-2">{stats.dailyStrk?.longest || 0}</div>
+                            <div className="text-xs text-white/40 uppercase tracking-widest">Longest Day Streak</div>
+                            <div className="text-xs text-white/30 mt-1">all-time best</div>
+                        </Card>
+                        <Card className="p-6 text-center">
+                            <div className="text-5xl font-bold text-blue-500 mb-2">{Math.round((lifetime.distance || 0) / Math.max(consistency.activeWeeks || 0, 1))}</div>
                             <div className="text-xs text-white/40 uppercase tracking-widest">Avg km/week</div>
                             <div className="text-xs text-white/30 mt-1">when active</div>
                         </Card>
@@ -345,7 +364,8 @@ export default function StatsPage() {
                                 <div key={weekIdx} className="flex flex-col gap-[3px]">
                                     {Array.from({ length: 7 }).map((_, dayIdx) => {
                                         const idx = weekIdx * 7 + dayIdx;
-                                        const data = calendar[idx];
+                                        // Use safeCalendar here
+                                        const data = safeCalendar[idx];
                                         const intensity = data ? Math.min(data.distance / maxCalendarDistance, 1) : 0;
                                         return (
                                             <div
@@ -382,7 +402,7 @@ export default function StatsPage() {
                     <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
                         <BarChart3 className="w-5 h-5 text-blue-500" /> Advanced Analytics
                     </h2>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         {/* Pace Trend */}
                         <Card className="p-6">
                             <div className="flex items-center gap-2 mb-4">
@@ -423,35 +443,7 @@ export default function StatsPage() {
                             </div>
                         </Card>
 
-                        {/* Race Predictor */}
-                        <Card className="p-6">
-                            <div className="flex items-center gap-2 mb-4">
-                                <Trophy className="w-4 h-4 text-white/50" />
-                                <span className="text-xs uppercase tracking-widest text-white/50">Race Predictor</span>
-                            </div>
-                            {stats.analytics?.predictions ? (
-                                <div className="space-y-3">
-                                    <div className="flex justify-between items-center text-sm">
-                                        <span className="text-white/60">5k</span>
-                                        <span className="font-mono">{formatTime(stats.analytics.predictions.p5k)}</span>
-                                    </div>
-                                    <div className="flex justify-between items-center text-sm">
-                                        <span className="text-white/60">10k</span>
-                                        <span className="font-mono">{formatTime(stats.analytics.predictions.p10k)}</span>
-                                    </div>
-                                    <div className="flex justify-between items-center text-sm">
-                                        <span className="text-white/60">Half Marathon</span>
-                                        <span className="font-mono">{formatTime(stats.analytics.predictions.pHalf)}</span>
-                                    </div>
-                                    <div className="flex justify-between items-center text-sm">
-                                        <span className="text-white/60">Marathon</span>
-                                        <span className="font-mono">{formatTime(stats.analytics.predictions.pMarathon)}</span>
-                                    </div>
-                                </div>
-                            ) : (
-                                <div className="text-white/30 text-sm">Run at least 5k to unlock predictions</div>
-                            )}
-                        </Card>
+
                     </div>
                 </section>
 
@@ -463,7 +455,7 @@ export default function StatsPage() {
                         </h2>
                         <Card className="p-6">
                             <div className="flex items-end gap-2 h-40">
-                                {weekly.map((w, i) => (
+                                {safeWeekly.map((w, i) => (
                                     <div key={i} className="flex-1 flex flex-col items-center gap-2">
                                         <motion.div
                                             initial={{ height: 0 }}
@@ -486,7 +478,7 @@ export default function StatsPage() {
                         </h2>
                         <Card className="p-6">
                             <div className="flex items-end gap-3 h-40">
-                                {monthly.slice(-6).map((m, i) => (
+                                {safeMonthly.slice(-6).map((m, i) => (
                                     <div key={i} className="flex-1 flex flex-col items-center gap-2">
                                         <motion.div
                                             initial={{ height: 0 }}
@@ -508,7 +500,7 @@ export default function StatsPage() {
                         <h2 className="text-xl font-bold mb-4">Day of Week Analysis</h2>
                         <Card className="p-6">
                             <div className="space-y-3">
-                                {dayOfWeek.map((d) => (
+                                {safeDayOfWeek.map((d) => (
                                     <div key={d.day} className="flex items-center gap-4">
                                         <span className="w-8 text-xs font-mono text-white/50">{d.day}</span>
                                         <div className="flex-1 h-6 bg-white/5 rounded-full overflow-hidden">
@@ -530,7 +522,7 @@ export default function StatsPage() {
                         <h2 className="text-xl font-bold mb-4">Pace Distribution</h2>
                         <Card className="p-6">
                             <div className="space-y-3">
-                                {paceZones.map((p) => (
+                                {safePaceZones.map((p) => (
                                     <div key={p.zone} className="flex items-center gap-4">
                                         <span className="w-20 text-xs font-mono text-white/50">{p.zone}</span>
                                         <div className="flex-1 h-6 bg-white/5 rounded-full overflow-hidden">
@@ -554,7 +546,7 @@ export default function StatsPage() {
                     <h2 className="text-xl font-bold mb-4">Time of Day Analysis</h2>
                     <Card className="p-6">
                         <div className="flex items-end gap-1">
-                            {hourOfDay.map((h) => (
+                            {safeHourOfDay.map((h) => (
                                 <div key={h.hour} className="flex-1 flex flex-col items-center gap-2">
                                     <motion.div
                                         initial={{ height: 0 }}
@@ -568,10 +560,6 @@ export default function StatsPage() {
                                                         "bg-blue-500"
                                         )}
                                     />
-                                    <div className="text-3xl font-bold font-outfit">
-                                        {((stats?.speed?.maxSpeed || 0) * 3.6).toFixed(1)}
-                                        <span className="text-sm font-normal text-white/50 ml-1">km/h</span>
-                                    </div>
                                     <div className="h-4 mt-1 flex items-center justify-center">
                                         {h.hour % 3 === 0 && (
                                             <span className="text-[10px] leading-none text-white/30">{h.hour}:00</span>

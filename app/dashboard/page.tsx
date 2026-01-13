@@ -11,6 +11,8 @@ import { PaymentMethodModal } from '@/components/PaymentMethodModal';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
 
+import { Goal, DashboardStatProps } from '@/types';
+
 interface DashboardData {
     user: {
         id: string;
@@ -22,8 +24,7 @@ interface DashboardData {
         onTrackGoals: number;
         hasPaymentMethod: boolean;
     };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    goals: any[];
+    goals: Goal[];
 }
 
 export default function Dashboard() {
@@ -205,8 +206,7 @@ export default function Dashboard() {
     );
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function DashboardStat({ title, value, unit, icon, onClick, isActionable }: any) {
+function DashboardStat({ title, value, unit, icon, onClick, isActionable }: DashboardStatProps) {
     return (
         <Card
             className={`flex flex-col justify-between h-40 group transition-all duration-300 ${isActionable ? 'cursor-pointer hover:border-orange-500 hover:bg-white/[0.03]' : 'hover:border-orange-500/30'}`}
@@ -230,8 +230,7 @@ function DashboardStat({ title, value, unit, icon, onClick, isActionable }: any)
     )
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function GoalRow({ goal }: { goal: any }) {
+function GoalRow({ goal }: { goal: Goal }) {
     const percentage = Math.min((goal.progress / goal.target) * 100, 100);
     const router = useRouter();
 

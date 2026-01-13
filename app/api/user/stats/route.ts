@@ -1,7 +1,30 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { supabase } from '@/lib/supabase';
 import { calculateLinearRegression, calculateCorrelation, predictRaceTime } from '@/lib/analytics';
 import { getCurrentUser } from '@/lib/auth';
+
+interface Activity {
+    id: string;
+    strava_id: number;
+    type: string;
+    distance: number;
+    moving_time: number;
+    total_elevation_gain: number | null;
+    calories: number | null;
+    average_heartrate: number | null;
+    max_heartrate: number | null;
+    max_speed: number | null;
+    start_date: string;
+}
+
+interface Goal {
+    activities: Activity[];
+}
+
+interface UserWithGoals {
+    id: string;
+    goals: Goal[];
+}
 
 export async function GET() {
     const sessionUser = await getCurrentUser();
@@ -11,30 +34,38 @@ export async function GET() {
     }
 
     // Get most recent user (in real app, use auth session)
-    const user = await prisma.user.findUnique({
-        where: { id: sessionUser.id },
-        include: {
-            goals: {
-                include: {
-                    activities: true,
-                },
-            },
-        },
-    });
+    const { data: userRaw, error } = await supabase
+        .from('users')
+        .select(`
+            *,
+            activities:activities(*),
+            goals:goals (
+                *
+            )
+        `)
+        .eq('id', sessionUser.id)
+        .single();
+
+    const user = userRaw as unknown as (UserWithGoals & { activities: Activity[] }) | null;
 
     if (!user) {
         return NextResponse.json({ error: 'No user found' }, { status: 404 });
     }
 
-    // Flatten and DE-DUPLICATE activities (handle multiple goal overlaps)
-    const rawActivities = user.goals.flatMap(g => g.activities);
-    const uniqueActivities = Array.from(new Map(rawActivities.map(item => [item.stravaId, item])).values());
+    // Use all user activities directly
+    const allActivities = user.activities || [];
 
-    // Filter outliers (e.g. GPS glitches with > 40km/h running speed or < 2:00/km pace)
-    const activities = uniqueActivities.filter(a => {
-        if (a.distance <= 0 || a.movingTime <= 0) return false;
-        const pace = (a.movingTime / 60) / (a.distance / 1000);
-        return pace > 2.0 && a.distance > 100;
+    // Filter for RUNNING activities only and remove outliers
+    const activities = allActivities.filter(a => {
+        // Strict check for running activities
+        if (a.type !== 'Run') return false;
+
+        if (a.distance <= 0 || a.moving_time <= 0) return false;
+        const pace = (a.moving_time / 60) / (a.distance / 1000);
+
+        // Allow slightly faster pace (world record 5k is ~2:30/km, sprinting can be faster)
+        // 1.5 min/km = 40 km/h. Good upper bound.
+        return pace > 1.5 && a.distance > 0;
     });
 
     if (activities.length === 0) {
@@ -54,23 +85,23 @@ export async function GET() {
 
     // Sort activities by date
     const sortedActivities = [...activities].sort((a, b) =>
-        new Date(a.startDate).getTime() - new Date(b.startDate).getTime()
+        new Date(a.start_date).getTime() - new Date(b.start_date).getTime()
     );
 
     // --- LIFETIME STATS ---
     const totalDistance = activities.reduce((sum, a) => sum + a.distance, 0); // meters
-    const totalTime = activities.reduce((sum, a) => sum + a.movingTime, 0); // seconds
-    const totalElevation = activities.reduce((sum, a) => sum + (a.totalElevationGain || 0), 0); // meters
+    const totalTime = activities.reduce((sum, a) => sum + a.moving_time, 0); // seconds
+    const totalElevation = activities.reduce((sum, a) => sum + (a.total_elevation_gain || 0), 0); // meters
     const totalCalories = activities.reduce((sum, a) => sum + (a.calories || 0), 0); // kcal
 
     // Heart Rate Calculations (Weighted by time)
-    const hrActivities = activities.filter(a => a.averageHeartrate != null && a.movingTime > 0);
-    const totalHrTime = hrActivities.reduce((sum, a) => sum + a.movingTime, 0);
-    const weightedHrSum = hrActivities.reduce((sum, a) => sum + (a.averageHeartrate! * a.movingTime), 0);
+    const hrActivities = activities.filter(a => a.average_heartrate != null && a.moving_time > 0);
+    const totalHrTime = hrActivities.reduce((sum, a) => sum + a.moving_time, 0);
+    const weightedHrSum = hrActivities.reduce((sum, a) => sum + (a.average_heartrate! * a.moving_time), 0);
     const avgHeartRate = totalHrTime > 0 ? Math.round(weightedHrSum / totalHrTime) : null;
-    const maxHeartRate = activities.reduce((max, a) => Math.max(max, a.maxHeartrate || 0), 0);
+    const maxHeartRate = activities.reduce((max, a) => Math.max(max, a.max_heartrate || 0), 0);
 
-    const maxSpeed = activities.reduce((max, a) => Math.max(max, a.maxSpeed || 0), 0); // m/s
+    const maxSpeed = activities.reduce((max, a) => Math.max(max, a.max_speed || 0), 0); // m/s
     const avgPace = totalTime > 0 ? (totalTime / 60) / (totalDistance / 1000) : 0; // min/km
 
     // --- ANALYTICS ---
@@ -78,13 +109,13 @@ export async function GET() {
     const sixMonthsAgo = new Date();
     sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
 
-    const recentActivitiesForAnalytics = sortedActivities.filter(a => new Date(a.startDate) > sixMonthsAgo);
+    const recentActivitiesForAnalytics = sortedActivities.filter(a => new Date(a.start_date) > sixMonthsAgo);
 
     const paceData = recentActivitiesForAnalytics
-        .filter(a => a.distance > 0 && a.movingTime > 0)
+        .filter(a => a.distance > 0 && a.moving_time > 0)
         .map(a => ({
-            date: new Date(a.startDate),
-            value: (a.movingTime / 60) / (a.distance / 1000)
+            date: new Date(a.start_date),
+            value: (a.moving_time / 60) / (a.distance / 1000)
         }));
 
     // Regression: Is pace improving?
@@ -92,10 +123,10 @@ export async function GET() {
 
     // Correlation: HR vs Pace
     const hrPaceData = recentActivitiesForAnalytics
-        .filter(a => a.averageHeartrate && a.distance > 0)
+        .filter(a => a.average_heartrate && a.distance > 0)
         .map(a => ({
-            hr: a.averageHeartrate!,
-            pace: (a.movingTime / 60) / (a.distance / 1000)
+            hr: a.average_heartrate!,
+            pace: (a.moving_time / 60) / (a.distance / 1000)
         }));
 
     const hrCorrelation = calculateCorrelation(
@@ -108,14 +139,14 @@ export async function GET() {
     const predictionActivities = sortedActivities.filter(a => a.distance >= 4000);
 
     const bestEffort = predictionActivities.length > 0
-        ? predictionActivities.sort((a, b) => ((a.movingTime / a.distance) - (b.movingTime / b.distance)))[0]
+        ? predictionActivities.sort((a, b) => ((a.moving_time / a.distance) - (b.moving_time / b.distance)))[0]
         : null;
 
     const predictions = bestEffort ? {
-        p5k: predictRaceTime(bestEffort.distance / 1000, bestEffort.movingTime / 60, 5),
-        p10k: predictRaceTime(bestEffort.distance / 1000, bestEffort.movingTime / 60, 10),
-        pHalf: predictRaceTime(bestEffort.distance / 1000, bestEffort.movingTime / 60, 21.1),
-        pMarathon: predictRaceTime(bestEffort.distance / 1000, bestEffort.movingTime / 60, 42.2),
+        p5k: predictRaceTime(bestEffort.distance / 1000, bestEffort.moving_time / 60, 5),
+        p10k: predictRaceTime(bestEffort.distance / 1000, bestEffort.moving_time / 60, 10),
+        pHalf: predictRaceTime(bestEffort.distance / 1000, bestEffort.moving_time / 60, 21.1),
+        pMarathon: predictRaceTime(bestEffort.distance / 1000, bestEffort.moving_time / 60, 42.2),
     } : null;
 
     // --- WEEKLY BREAKDOWN (last 12 weeks) ---
@@ -131,14 +162,14 @@ export async function GET() {
         weekEnd.setDate(weekEnd.getDate() + 7);
 
         const weekActivities = activities.filter(a => {
-            const date = new Date(a.startDate);
+            const date = new Date(a.start_date);
             return date >= weekStart && date < weekEnd;
         });
 
         weeklyData.push({
             week: weekStart.toISOString().split('T')[0],
             distance: weekActivities.reduce((sum, a) => sum + a.distance, 0) / 1000,
-            time: weekActivities.reduce((sum, a) => sum + a.movingTime, 0) / 60,
+            time: weekActivities.reduce((sum, a) => sum + a.moving_time, 0) / 60,
             count: weekActivities.length,
         });
     }
@@ -151,26 +182,26 @@ export async function GET() {
         const monthEnd = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
 
         const monthActivities = activities.filter(a => {
-            const date = new Date(a.startDate);
+            const date = new Date(a.start_date);
             return date >= monthStart && date <= monthEnd;
         });
 
         monthlyData.push({
             month: monthStart.toLocaleString('default', { month: 'short', year: '2-digit' }),
             distance: monthActivities.reduce((sum, a) => sum + a.distance, 0) / 1000,
-            time: monthActivities.reduce((sum, a) => sum + a.movingTime, 0) / 60,
+            time: monthActivities.reduce((sum, a) => sum + a.moving_time, 0) / 60,
             count: monthActivities.length,
         });
     }
 
     // --- CONSISTENCY SCORE ---
     const firstActivity = sortedActivities[0];
-    const firstDate = new Date(firstActivity.startDate);
+    const firstDate = new Date(firstActivity.start_date);
     const totalWeeks = Math.ceil((now.getTime() - firstDate.getTime()) / (7 * 24 * 60 * 60 * 1000));
 
     const activeWeeksSet = new Set<string>();
     activities.forEach(a => {
-        const date = new Date(a.startDate);
+        const date = new Date(a.start_date);
         const weekStart = new Date(date);
         weekStart.setDate(weekStart.getDate() - weekStart.getDay());
         activeWeeksSet.add(weekStart.toISOString().split('T')[0]);
@@ -219,12 +250,53 @@ export async function GET() {
         }
     }
 
+    // --- DAILY STREAK TRACKING ---
+    const uniqueDates = Array.from(new Set(activities.map(a => a.start_date.split('T')[0]))).sort();
+    let currentDailyStreak = 0;
+    let longestDailyStreak = 0;
+    let tempDailyStreak = 0;
+    let lastDateStr = '';
+
+    uniqueDates.forEach((dateStr, i) => {
+        if (i === 0) {
+            tempDailyStreak = 1;
+        } else {
+            const prevDate = new Date(lastDateStr);
+            const currDate = new Date(dateStr);
+            const diffTime = Math.abs(currDate.getTime() - prevDate.getTime());
+            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+            if (diffDays === 1) {
+                tempDailyStreak++;
+            } else {
+                tempDailyStreak = 1;
+            }
+        }
+        longestDailyStreak = Math.max(longestDailyStreak, tempDailyStreak);
+        lastDateStr = dateStr;
+    });
+
+    // Check if current daily streak is active
+    const todayStr = now.toISOString().split('T')[0];
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toISOString().split('T')[0];
+
+    if (uniqueDates.includes(todayStr)) {
+        currentDailyStreak = tempDailyStreak;
+    } else if (uniqueDates.includes(yesterdayStr) && lastDateStr === yesterdayStr) {
+        currentDailyStreak = tempDailyStreak;
+    } else {
+        currentDailyStreak = 0;
+    }
+
+
     // --- DAY OF WEEK ANALYSIS ---
     const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     const dayOfWeekData = dayNames.map((name, i) => {
-        const dayActivities = activities.filter(a => new Date(a.startDate).getDay() === i);
+        const dayActivities = activities.filter(a => new Date(a.start_date).getDay() === i);
         const avgPaceForDay = dayActivities.length > 0
-            ? (dayActivities.reduce((sum, a) => sum + a.movingTime, 0) / 60) /
+            ? (dayActivities.reduce((sum, a) => sum + a.moving_time, 0) / 60) /
             (dayActivities.reduce((sum, a) => sum + a.distance, 0) / 1000)
             : 0;
         return {
@@ -237,12 +309,12 @@ export async function GET() {
 
     // --- HOUR OF DAY ANALYSIS ---
     const hourOfDayData = Array.from({ length: 24 }, (_, hour) => {
-        const hourActivities = activities.filter(a => new Date(a.startDate).getHours() === hour);
+        const hourActivities = activities.filter(a => new Date(a.start_date).getHours() === hour);
         return {
             hour,
             count: hourActivities.length,
             avgPace: hourActivities.length > 0
-                ? (hourActivities.reduce((sum, a) => sum + a.movingTime, 0) / 60) /
+                ? (hourActivities.reduce((sum, a) => sum + a.moving_time, 0) / 60) /
                 (hourActivities.reduce((sum, a) => sum + a.distance, 0) / 1000)
                 : 0,
         };
@@ -250,7 +322,7 @@ export async function GET() {
 
     // --- PACE ZONES ---
     const paceHistogramData = activities.map(a => {
-        const pace = a.distance > 0 ? (a.movingTime / 60) / (a.distance / 1000) : 0;
+        const pace = a.distance > 0 ? (a.moving_time / 60) / (a.distance / 1000) : 0;
         return pace;
     }).filter(p => p > 0 && p < 15); // Filter out unreasonable paces
 
@@ -274,9 +346,9 @@ export async function GET() {
 
     // --- PERSONAL RECORDS ---
     const fastestPaceActivity = activities.reduce((fastest, a) => {
-        const pace = a.distance > 0 ? (a.movingTime / 60) / (a.distance / 1000) : 999;
+        const pace = a.distance > 0 ? (a.moving_time / 60) / (a.distance / 1000) : 999;
         const fastestPace = fastest && fastest.distance > 0
-            ? (fastest.movingTime / 60) / (fastest.distance / 1000)
+            ? (fastest.moving_time / 60) / (fastest.distance / 1000)
             : 999;
         return pace < fastestPace ? a : fastest;
     }, activities[0]);
@@ -285,19 +357,19 @@ export async function GET() {
         a.distance > (longest?.distance || 0) ? a : longest, activities[0]);
 
     const longestTime = activities.reduce((longest, a) =>
-        a.movingTime > (longest?.movingTime || 0) ? a : longest, activities[0]);
+        a.moving_time > (longest?.moving_time || 0) ? a : longest, activities[0]);
 
     // --- RECENT ACTIVITIES (last 10) ---
     const recentActivities = [...activities]
-        .sort((a, b) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime())
+        .sort((a, b) => new Date(b.start_date).getTime() - new Date(a.start_date).getTime())
         .slice(0, 10)
         .map(a => ({
             id: a.id,
             type: a.type,
             distance: a.distance / 1000,
-            time: a.movingTime / 60,
-            pace: a.distance > 0 ? (a.movingTime / 60) / (a.distance / 1000) : 0,
-            date: a.startDate,
+            time: a.moving_time / 60,
+            pace: a.distance > 0 ? (a.moving_time / 60) / (a.distance / 1000) : 0,
+            date: a.start_date,
         }));
 
     // --- ACTIVITY CALENDAR (last 365 days) ---
@@ -309,7 +381,7 @@ export async function GET() {
         const dateStr = date.toISOString().split('T')[0];
 
         const dayActivities = activities.filter(a => {
-            const actDate = new Date(a.startDate);
+            const actDate = new Date(a.start_date);
             return actDate.toISOString().split('T')[0] === dateStr;
         });
 
@@ -356,6 +428,10 @@ export async function GET() {
             current: currentStreak,
             longest: longestStreak,
         },
+        dailyStrk: {
+            current: currentDailyStreak,
+            longest: longestDailyStreak,
+        },
         dayOfWeek: dayOfWeekData,
         hourOfDay: hourOfDayData,
         paceZones: paceZones.map(z => ({ zone: z.zone, count: z.count })),
@@ -363,18 +439,18 @@ export async function GET() {
         calendar: calendarData,
         personalRecords: {
             fastestPace: fastestPaceActivity ? {
-                pace: (fastestPaceActivity.movingTime / 60) / (fastestPaceActivity.distance / 1000),
-                date: fastestPaceActivity.startDate,
+                pace: (fastestPaceActivity.moving_time / 60) / (fastestPaceActivity.distance / 1000),
+                date: fastestPaceActivity.start_date,
                 distance: fastestPaceActivity.distance / 1000,
             } : null,
             longestRun: longestRun ? {
                 distance: longestRun.distance / 1000,
-                date: longestRun.startDate,
-                time: longestRun.movingTime / 60,
+                date: longestRun.start_date,
+                time: longestRun.moving_time / 60,
             } : null,
             longestTime: longestTime ? {
-                time: longestTime.movingTime / 60,
-                date: longestTime.startDate,
+                time: longestTime.moving_time / 60,
+                date: longestTime.start_date,
                 distance: longestTime.distance / 1000,
             } : null,
         },
