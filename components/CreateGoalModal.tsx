@@ -75,31 +75,13 @@ export function CreateGoalModal({ isOpen, onClose, onSuccess, userId, hasPayment
                             </div>
 
                             <form onSubmit={handleSubmit} className="p-8 space-y-6">
-                                <div>
-                                    <label className="block text-xs font-mono uppercase tracking-wider text-white/40 mb-3">Protocol Type</label>
-                                    <div className="grid grid-cols-2 gap-3">
-                                        {['Run', 'Ride'].map((t) => (
-                                            <button
-                                                key={t}
-                                                type="button"
-                                                onClick={() => setType(t)}
-                                                className={`flex items-center justify-center gap-2 py-4 rounded-xl border transition-all duration-300 ${type === t
-                                                    ? 'bg-orange-600 border-orange-500 text-white shadow-[0_0_20px_-5px_rgba(234,88,12,0.5)]'
-                                                    : 'bg-white/5 border-white/10 text-white/60 hover:bg-white/10 hover:border-white/20'
-                                                    }`}
-                                            >
-                                                <Activity className="w-4 h-4" />
-                                                <span className="font-medium">{t}</span>
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
+
 
                                 <div>
                                     <label className="block text-xs font-mono uppercase tracking-wider text-white/40 mb-3">Weekly Target</label>
                                     <div className="relative group">
-                                        <div className="absolute inset-0 bg-orange-600/5 rounded-xl opacity-0 group-focus-within:opacity-100 transition-opacity" />
-                                        <Target className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/30 group-focus-within:text-orange-500 transition-colors" />
+                                        <div className="absolute inset-0 bg-orange-600/5 rounded-xl opacity-0 group-focus-within:opacity-100 transition-opacity pointer-events-none" />
+                                        <Target className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/30 group-focus-within:text-orange-500 transition-colors pointer-events-none" />
                                         <input
                                             type="number"
                                             value={target}
@@ -117,8 +99,8 @@ export function CreateGoalModal({ isOpen, onClose, onSuccess, userId, hasPayment
                                 <div>
                                     <label className="block text-xs font-mono uppercase tracking-wider text-white/40 mb-3">Staked Penalty</label>
                                     <div className="relative group">
-                                        <div className="absolute inset-0 bg-red-600/5 rounded-xl opacity-0 group-focus-within:opacity-100 transition-opacity" />
-                                        <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/30 group-focus-within:text-red-500 transition-colors" />
+                                        <div className="absolute inset-0 bg-red-600/5 rounded-xl opacity-0 group-focus-within:opacity-100 transition-opacity pointer-events-none" />
+                                        <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/30 group-focus-within:text-red-500 transition-colors pointer-events-none" />
                                         <input
                                             type="number"
                                             value={penalty}
